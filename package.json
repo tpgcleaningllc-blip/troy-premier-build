@@ -1,0 +1,10 @@
+{
+  "name": "troy-premier-cleaning",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Troy Premier Green Cleaning Co. website, Stripe payments, and client/cleaner portals",
+  "dependencies": {
+    "stripe": "^17.4.0",
+    "@supabase/supabase-js": "^2.47.10"
+  }
+}
