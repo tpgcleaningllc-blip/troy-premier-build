@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Cleaner Portal | Troy Premier Green Cleaning Co.</title>
+<meta name="description" content="View your assigned jobs and update their status." />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body>
+
+<header>
+  <div class="wrap header-row">
+    <a href="index.html" class="brand">Troy Premier<span>Green Cleaning</span></a>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="client.html">Client Portal</a>
+    </nav>
+  </div>
+</header>
+
+<div class="portal-shell">
+  <h1 class="section-title">Cleaner Portal</h1>
+  <p class="section-sub">Sign in with the email your schedule is under to see your assigned jobs.</p>
+
+  <div id="loginBox" class="login-box">
+    <h2>Sign in</h2>
+    <p>We will email you a secure sign in link, no password needed.</p>
+    <div class="field" style="margin-top:14px;">
+      <label for="loginEmail">Email</label>
+      <input type="email" id="loginEmail" required />
+    </div>
+    <button class="btn btn-primary btn-block" style="margin-top:14px;" id="loginBtn">Send sign in link</button>
+    <p class="msg" id="loginMsg"></p>
+  </div>
+
+  <div id="portalContent" hidden>
+    <div class="session-bar">
+      <span class="who">Signed in as <strong id="whoEmail"></strong></span>
+      <button class="btn btn-outline" id="signOutBtn">Sign out</button>
+    </div>
+
+    <div class="tab-row">
+      <button class="tab-btn active" data-tab="upcoming">Upcoming</button>
+      <button class="tab-btn" data-tab="completed">Completed</button>
+    </div>
+
+    <div id="tab-upcoming" class="table-list"></div>
+    <div id="tab-completed" class="table-list" hidden></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+/* Uses the same Supabase project as index.html, paste the same values here. */
+const SUPABASE_URL = "https://YOUR-PROJECT-REF.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR-ANON-PUBLIC-KEY";
+let supabaseClient = null;
+try {
+  supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+} catch (err) {
+  console.error("Supabase failed to load", err);
+  document.getElementById("loginMsg").className = "msg error";
+  document.getElementById("loginMsg").textContent = "This portal is temporarily unavailable, please try again in a moment.";
+}
+
+const loginBox = document.getElementById("loginBox");
+const portalContent = document.getElementById("portalContent");
+const whoEmail = document.getElementById("whoEmail");
+
+const STATUS_FLOW = ["unassigned", "scheduled", "in_progress", "completed"];
+
+function niceDate(d) { return d ? new Date(d + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "Not scheduled yet"; }
+function niceStatus(s) { return (s || "").replace(/_/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); }); }
+
+/* ============================== sign in ================================= */
+document.getElementById("loginBtn").addEventListener("click", async function () {
+  const email = document.getElementById("loginEmail").value.trim();
+  const msgEl = document.getElementById("loginMsg");
+  if (!email) return;
+  if (!supabaseClient) {
+    msgEl.className = "msg error";
+    msgEl.textContent = "This portal is temporarily unavailable, please try again in a moment.";
+    return;
+  }
+  const btn = this;
+  btn.disabled = true;
+  btn.textContent = "Sending...";
+  try {
+    const result = await supabaseClient.auth.signInWithOtp({
+      email: email,
+      options: { emailRedirectTo: window.location.href }
+    });
+    if (result.error) throw result.error;
+    msgEl.className = "msg success";
+    msgEl.textContent = "Check your email for a sign in link.";
+  } catch (err) {
+    msgEl.className = "msg error";
+    msgEl.textContent = "Could not send the link, please try again.";
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Send sign in link";
+  }
+});
+
+document.getElementById("signOutBtn").addEventListener("click", async function () {
+  await supabaseClient.auth.signOut();
+  window.location.reload();
+});
+
+/* ============================== data loading ============================= */
+let currentEmail = null;
+
+async function loadPortal(email) {
+  currentEmail = email;
+  loginBox.hidden = true;
+  portalContent.hidden = false;
+  whoEmail.textContent = email;
+  await refreshJobs();
+}
+
+async function refreshJobs() {
+  const result = await supabaseClient
+    .from("jobs")
+    .select("*, bookings(service, address, city, zip, phone, special_instructions)")
+    .eq("cleaner_email", currentEmail)
+    .order("scheduled_date", { ascending: true });
+
+  const rows = result.data || [];
+  const upcoming = rows.filter(function (j) { return j.status !== "completed"; });
+  const completed = rows.filter(function (j) { return j.status === "completed"; });
+  renderJobs("tab-upcoming", upcoming, true);
+  renderJobs("tab-completed", completed, false);
+}
+
+function renderJobs(elId, rows, allowUpdate) {
+  const el = document.getElementById(elId);
+  if (!rows.length) { el.innerHTML = '<div class="empty-state">Nothing here.</div>'; return; }
+
+  el.innerHTML = rows.map(function (j) {
+    const b = j.bookings || {};
+    const statusControl = allowUpdate
+      ? '<select class="status-select" data-job-id="' + j.id + '">' +
+          STATUS_FLOW.map(function (s) {
+            return '<option value="' + s + '"' + (s === j.status ? " selected" : "") + '>' + niceStatus(s) + '</option>';
+          }).join("") +
+        '</select>'
+      : '<span class="badge ' + j.status + '">' + niceStatus(j.status) + '</span>';
+
+    const notesControl = allowUpdate
+      ? '<textarea class="job-notes" data-job-id="' + j.id + '" placeholder="Notes for the client or office" style="margin-top:10px; width:100%; min-height:56px; padding:8px; border:1px solid var(--line); border-radius:4px; font-family:inherit;">' + (j.notes || "") + '</textarea>' +
+        '<button class="btn btn-outline" data-save-notes="' + j.id + '" style="margin-top:8px;">Save note</button>'
+      : (j.notes ? '<p class="meta" style="margin-top:8px;">' + j.notes + '</p>' : '');
+
+    return '<div class="row-card"><div class="row-top"><div><h3>' + (b.service || "Cleaning job") + '</h3>' +
+      '<p class="meta">' + (b.address || "") + (b.city ? ", " + b.city + " " + (b.zip || "") : "") + " &middot; " + niceDate(j.scheduled_date) + '</p>' +
+      (b.special_instructions ? '<p class="meta">Instructions: ' + b.special_instructions + '</p>' : '') +
+      '</div>' + statusControl + '</div>' + notesControl + '</div>';
+  }).join("");
+
+  el.querySelectorAll("[data-job-id].status-select").forEach(function (select) {
+    select.addEventListener("change", async function () {
+      const jobId = select.getAttribute("data-job-id");
+      select.disabled = true;
+      const result = await supabaseClient.from("jobs").update({ status: select.value }).eq("id", jobId);
+      select.disabled = false;
+      if (result.error) {
+        alert("Could not update status, please try again.");
+        console.error(result.error);
+      } else {
+        refreshJobs();
+      }
+    });
+  });
+
+  el.querySelectorAll("[data-save-notes]").forEach(function (btn) {
+    btn.addEventListener("click", async function () {
+      const jobId = btn.getAttribute("data-save-notes");
+      const textarea = el.querySelector('textarea[data-job-id="' + jobId + '"]');
+      btn.disabled = true;
+      btn.textContent = "Saving...";
+      const result = await supabaseClient.from("jobs").update({ notes: textarea.value.trim() }).eq("id", jobId);
+      btn.disabled = false;
+      btn.textContent = "Save note";
+      if (result.error) {
+        alert("Could not save the note, please try again.");
+        console.error(result.error);
+      }
+    });
+  });
+}
+
+/* ============================== tabs ====================================== */
+document.querySelectorAll(".tab-btn").forEach(function (tab) {
+  tab.addEventListener("click", function () {
+    document.querySelectorAll(".tab-btn").forEach(function (t) { t.classList.remove("active"); });
+    tab.classList.add("active");
+    ["upcoming", "completed"].forEach(function (name) {
+      document.getElementById("tab-" + name).hidden = name !== tab.dataset.tab;
+    });
+  });
+});
+
+/* ============================== boot ======================================= */
+if (supabaseClient) {
+  supabaseClient.auth.getSession().then(function (result) {
+    const session = result.data.session;
+    if (session && session.user && session.user.email) {
+      loadPortal(session.user.email);
+    }
+  });
+  supabaseClient.auth.onAuthStateChange(function (_event, session) {
+    if (session && session.user && session.user.email) {
+      loadPortal(session.user.email);
+    }
+  });
+}
+</script>
+</body>
+</html>
