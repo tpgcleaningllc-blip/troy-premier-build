@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Client Portal | Troy Premier Green Cleaning Co.</title>
+<meta name="description" content="View your bookings and jobs, and pay open invoices." />
+<link rel="stylesheet" href="assets/site.css" />
+</head>
+<body>
+
+<header>
+  <div class="wrap header-row">
+    <a href="index.html" class="brand">Troy Premier<span>Green Cleaning</span></a>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="index.html#services">Services</a>
+      <a href="cleaner.html">Cleaner Portal</a>
+    </nav>
+  </div>
+</header>
+
+<div class="portal-shell">
+  <h1 class="section-title">Client Portal</h1>
+  <p class="section-sub">Sign in with the email you used when you booked to see your bookings, jobs, and any open invoices.</p>
+
+  <div id="loginBox" class="login-box">
+    <h2>Sign in</h2>
+    <p>We will email you a secure sign in link, no password needed.</p>
+    <div class="field" style="margin-top:14px;">
+      <label for="loginEmail">Email</label>
+      <input type="email" id="loginEmail" required />
+    </div>
+    <button class="btn btn-primary btn-block" style="margin-top:14px;" id="loginBtn">Send sign in link</button>
+    <p class="msg" id="loginMsg"></p>
+  </div>
+
+  <div id="portalContent" hidden>
+    <div class="session-bar">
+      <span class="who">Signed in as <strong id="whoEmail"></strong></span>
+      <button class="btn btn-outline" id="signOutBtn">Sign out</button>
+    </div>
+
+    <div id="payBanner"></div>
+
+    <div class="tab-row">
+      <button class="tab-btn active" data-tab="bookings">Bookings</button>
+      <button class="tab-btn" data-tab="jobs">Jobs</button>
+      <button class="tab-btn" data-tab="invoices">Invoices</button>
+    </div>
+
+    <div id="tab-bookings" class="table-list"></div>
+    <div id="tab-jobs" class="table-list" hidden></div>
+    <div id="tab-invoices" class="table-list" hidden></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+/* Uses the same Supabase project as index.html, paste the same values here. */
+const SUPABASE_URL = "https://YOUR-PROJECT-REF.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR-ANON-PUBLIC-KEY";
+let supabaseClient = null;
+try {
+  supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+} catch (err) {
+  console.error("Supabase failed to load", err);
+  document.getElementById("loginMsg").className = "msg error";
+  document.getElementById("loginMsg").textContent = "This portal is temporarily unavailable, please try again in a moment.";
+}
+
+const loginBox = document.getElementById("loginBox");
+const portalContent = document.getElementById("portalContent");
+const whoEmail = document.getElementById("whoEmail");
+
+function money(n) { return "$" + Number(n || 0).toFixed(2); }
+function niceDate(d) { return d ? new Date(d + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "Not scheduled yet"; }
+function niceStatus(s) { return (s || "").replace(/_/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); }); }
+
+/* ============================== sign in ================================= */
+document.getElementById("loginBtn").addEventListener("click", async function () {
+  const email = document.getElementById("loginEmail").value.trim();
+  const msgEl = document.getElementById("loginMsg");
+  if (!email) return;
+  if (!supabaseClient) {
+    msgEl.className = "msg error";
+    msgEl.textContent = "This portal is temporarily unavailable, please try again in a moment.";
+    return;
+  }
+  const btn = this;
+  btn.disabled = true;
+  btn.textContent = "Sending...";
+  try {
+    const result = await supabaseClient.auth.signInWithOtp({
+      email: email,
+      options: { emailRedirectTo: window.location.href }
+    });
+    if (result.error) throw result.error;
+    msgEl.className = "msg success";
+    msgEl.textContent = "Check your email for a sign in link.";
+  } catch (err) {
+    msgEl.className = "msg error";
+    msgEl.textContent = "Could not send the link, please try again.";
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Send sign in link";
+  }
+});
+
+document.getElementById("signOutBtn").addEventListener("click", async function () {
+  await supabaseClient.auth.signOut();
+  window.location.reload();
+});
+
+/* ============================== payment return banner ==================== */
+(function showPayBanner() {
+  const params = new URLSearchParams(window.location.search);
+  const banner = document.getElementById("payBanner");
+  if (!banner) return;
+  if (params.get("invoice") === "success") {
+    banner.innerHTML = '<div class="msg success" style="background:var(--pine-50); border:1px solid var(--pine-600); border-radius:8px; padding:14px 18px;">Payment received, thank you.</div>';
+  } else if (params.get("invoice") === "cancelled") {
+    banner.innerHTML = '<div class="msg error" style="background:#fbeee8; border:1px solid #d98a6c; border-radius:8px; padding:14px 18px;">Payment was not completed, the invoice is still open.</div>';
+  }
+})();
+
+/* ============================== data loading ============================= */
+async function loadPortal(email) {
+  loginBox.hidden = true;
+  portalContent.hidden = false;
+  whoEmail.textContent = email;
+
+  const [bookings, jobs, invoices] = await Promise.all([
+    supabaseClient.from("bookings").select("*").eq("email", email).order("created_at", { ascending: false }),
+    supabaseClient.from("jobs").select("*, bookings(service, address, city)").order("created_at", { ascending: false }),
+    supabaseClient.from("invoices").select("*").eq("client_email", email).order("created_at", { ascending: false })
+  ]);
+
+  renderBookings(bookings.data || []);
+  renderJobs(jobs.data || []);
+  renderInvoices(invoices.data || []);
+}
+
+function renderBookings(rows) {
+  const el = document.getElementById("tab-bookings");
+  if (!rows.length) { el.innerHTML = '<div class="empty-state">No bookings yet.</div>'; return; }
+  el.innerHTML = rows.map(function (b) {
+    return '<div class="row-card"><div class="row-top"><div><h3>' + b.service + '</h3>' +
+      '<p class="meta">' + b.address + ", " + b.city + " &middot; " + niceDate(b.preferred_date) + '</p></div>' +
+      '<span class="badge ' + b.status + '">' + niceStatus(b.status) + '</span></div>' +
+      '<p class="meta" style="margin-top:8px;">Amount: ' + money(b.estimated_price) + '</p></div>';
+  }).join("");
+}
+
+function renderJobs(rows) {
+  const el = document.getElementById("tab-jobs");
+  if (!rows.length) { el.innerHTML = '<div class="empty-state">No jobs scheduled yet.</div>'; return; }
+  el.innerHTML = rows.map(function (j) {
+    const b = j.bookings || {};
+    return '<div class="row-card"><div class="row-top"><div><h3>' + (b.service || "Cleaning job") + '</h3>' +
+      '<p class="meta">' + (b.address || "") + (b.city ? ", " + b.city : "") + " &middot; " + niceDate(j.scheduled_date) + '</p></div>' +
+      '<span class="badge ' + j.status + '">' + niceStatus(j.status) + '</span></div>' +
+      (j.notes ? '<p class="meta" style="margin-top:8px;">Note from your cleaner: ' + j.notes + '</p>' : '') + '</div>';
+  }).join("");
+}
+
+function renderInvoices(rows) {
+  const el = document.getElementById("tab-invoices");
+  if (!rows.length) { el.innerHTML = '<div class="empty-state">No invoices on file.</div>'; return; }
+  el.innerHTML = rows.map(function (inv) {
+    const payBtn = inv.status === "unpaid"
+      ? '<button class="btn btn-primary" data-pay-invoice="' + inv.id + '" style="margin-top:10px;">Pay now</button>'
+      : '';
+    return '<div class="row-card"><div class="row-top"><div><h3>' + inv.description + '</h3>' +
+      '<p class="meta">' + money(inv.amount) + '</p></div>' +
+      '<span class="badge ' + inv.status + '">' + niceStatus(inv.status) + '</span></div>' + payBtn + '</div>';
+  }).join("");
+
+  el.querySelectorAll("[data-pay-invoice]").forEach(function (btn) {
+    btn.addEventListener("click", async function () {
+      btn.disabled = true;
+      btn.textContent = "Preparing checkout...";
+      try {
+        const response = await fetch("/.netlify/functions/create-checkout-session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "invoice", id: btn.getAttribute("data-pay-invoice") })
+        });
+        const session = await response.json();
+        if (!response.ok || !session.url) throw new Error(session.error || "Could not start checkout");
+        window.location.href = session.url;
+      } catch (err) {
+        alert("Something went wrong starting checkout, please try again.");
+        console.error(err);
+        btn.disabled = false;
+        btn.textContent = "Pay now";
+      }
+    });
+  });
+}
+
+/* ============================== tabs ====================================== */
+document.querySelectorAll(".tab-btn").forEach(function (tab) {
+  tab.addEventListener("click", function () {
+    document.querySelectorAll(".tab-btn").forEach(function (t) { t.classList.remove("active"); });
+    tab.classList.add("active");
+    ["bookings", "jobs", "invoices"].forEach(function (name) {
+      document.getElementById("tab-" + name).hidden = name !== tab.dataset.tab;
+    });
+  });
+});
+
+/* ============================== boot ======================================= */
+if (supabaseClient) {
+  supabaseClient.auth.getSession().then(function (result) {
+    const session = result.data.session;
+    if (session && session.user && session.user.email) {
+      loadPortal(session.user.email);
+    }
+  });
+  supabaseClient.auth.onAuthStateChange(function (_event, session) {
+    if (session && session.user && session.user.email) {
+      loadPortal(session.user.email);
+    }
+  });
+}
+</script>
+</body>
+</html>
