@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Troy Premier Green Cleaning Co. | House &amp; Commercial Cleaning in Troy, MI</title>
+<meta name="description" content="Locally operated, eco friendly residential and commercial cleaning in Troy, MI and Metro Detroit. Instant estimate, easy online booking, secure card payment." />
+<link rel="stylesheet" href="assets/site.css" />
+
+<!--
+  =============================================================================
+  HOW TO SET THIS UP (do this before deploying)
+  =============================================================================
+  This is now a small project instead of one file, because taking real card
+  payments needs a tiny bit of server code (Stripe secret keys can never sit
+  in a page a visitor's browser can read). Full instructions are in
+  SETUP.md, but the short version:
+
+  1. In Supabase, run supabase schema.sql (SQL Editor, New query, Run).
+  2. In Supabase, go to Settings, API and copy:
+       "Project URL"     into SUPABASE_URL below
+       "anon public" key into SUPABASE_ANON_KEY below
+     (never put the "service_role" key in this file, it belongs only in
+     the server functions under netlify/functions)
+  3. Create a Stripe account, then set STRIPE_SECRET_KEY and
+     STRIPE_WEBHOOK_SECRET as environment variables in Netlify (see
+     SETUP.md, section "Connect Stripe").
+  4. To change prices, edit the PRICING section below, those are the only
+     numbers that control what customers are quoted.
+  5. Deploy the whole troy premier cleaning folder to Netlify (drag the
+     folder onto app.netlify.com/drop, or connect it as a GitHub repo).
+     Leave "Build command" blank and "Publish directory" as "." since
+     nothing needs to be built, Netlify will pick up the functions folder
+     on its own.
+  =============================================================================
+-->
+
+<style>
+  /* page specific tweaks only, shared look lives in assets/site.css */
+  .pay-banner { border-radius: 8px; padding: 14px 18px; margin: 18px 0; font-size: 0.9rem; }
+  .pay-banner.success { background: var(--pine-50); border: 1px solid var(--pine-600); color: var(--pine-800); }
+  .pay-banner.cancel { background: #fbeee8; border: 1px solid #d98a6c; color: #8a3d22; }
+  .portal-links { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap header-row">
+    <a href="#top" class="brand">Troy Premier<span>Green Cleaning</span></a>
+    <nav>
+      <a href="#services">Services</a>
+      <a href="#book">Book Now</a>
+      <a href="#commercial">Commercial</a>
+      <a href="#faq">FAQ</a>
+      <a href="client.html">Client Portal</a>
+      <a href="cleaner.html">Cleaner Portal</a>
+    </nav>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <a href="#book" class="btn btn-primary">Book Now</a>
+    </div>
+  </div>
+</header>
+
+<div id="top"></div>
+
+<section class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Locally operated in Troy, Michigan</p>
+    <h1>A cleaning crew Troy homeowners actually keep rebooking.</h1>
+    <p>Eco friendly residential and commercial cleaning, booked and paid for online in minutes with an instant estimate, no guessing, no hard sell.</p>
+    <div class="hero-ctas">
+      <a href="#book" class="btn btn-primary btn-lg">Get an instant estimate</a>
+      <a href="#commercial" class="btn btn-outline btn-lg">Request a commercial quote</a>
+    </div>
+    <div class="portal-links">
+      <a href="client.html" class="btn btn-outline">Client Portal</a>
+      <a href="cleaner.html" class="btn btn-outline">Cleaner Portal</a>
+    </div>
+  </div>
+</section>
+
+<div class="trust-bar">
+  <div class="wrap trust-grid">
+    <div>Locally operated in Troy, MI</div>
+    <div>Eco conscious products</div>
+    <div>Consistent checklist every visit</div>
+    <div>Online booking, upfront pricing</div>
+  </div>
+</div>
+
+<section id="services">
+  <div class="wrap">
+    <h2 class="section-title">Our services</h2>
+    <p class="section-sub">Residential and commercial cleaning, pick what you need below.</p>
+    <div class="cards" id="serviceCards"></div>
+  </div>
+</section>
+
+<section id="book" style="background:var(--pine-50); border-top:1px solid var(--line); border-bottom:1px solid var(--line);">
+  <div class="wrap">
+    <h2 class="section-title">Get an instant estimate</h2>
+    <p class="section-sub">Answer a few questions and we will show you a price before you pay. You will be taken to a secure Stripe checkout page to complete payment and confirm your booking.</p>
+
+    <div id="payBanner"></div>
+
+    <form id="bookingForm" class="form-card">
+      <input type="text" name="company_website" class="honeypot" tabindex="-1" autocomplete="off" aria-hidden="true" />
+
+      <div class="field" style="margin-bottom:14px;">
+        <label for="service">Service</label>
+        <select id="service" required></select>
+      </div>
+
+      <div class="grid2">
+        <div class="field">
+          <label for="bedrooms">Bedrooms</label>
+          <input type="number" id="bedrooms" min="0" value="2" />
+        </div>
+        <div class="field">
+          <label for="bathrooms">Bathrooms</label>
+          <input type="number" id="bathrooms" min="0" step="0.5" value="1" />
+        </div>
+        <div class="field">
+          <label for="sqft">Square footage</label>
+          <input type="number" id="sqft" min="0" value="1200" />
+        </div>
+        <div class="field">
+          <label for="frequency">Frequency</label>
+          <select id="frequency">
+            <option value="one_time">One time</option>
+            <option value="weekly">Weekly (save 15%)</option>
+            <option value="biweekly">Every 2 weeks (save 10%)</option>
+            <option value="monthly">Monthly (save 5%)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field" style="margin-top:14px;">
+        <label>Add ons</label>
+        <div class="checkbox-grid" id="addonGrid"></div>
+      </div>
+
+      <div class="grid2" style="margin-top:14px;">
+        <div class="field">
+          <label for="firstName">First name</label>
+          <input type="text" id="firstName" required />
+        </div>
+        <div class="field">
+          <label for="lastName">Last name</label>
+          <input type="text" id="lastName" required />
+        </div>
+        <div class="field">
+          <label for="email">Email</label>
+          <input type="email" id="email" required />
+        </div>
+        <div class="field">
+          <label for="phone">Phone</label>
+          <input type="tel" id="phone" required />
+        </div>
+      </div>
+
+      <div class="field" style="margin-top:14px;">
+        <label for="address">Address</label>
+        <input type="text" id="address" required />
+      </div>
+      <div class="grid2" style="margin-top:14px;">
+        <div class="field">
+          <label for="city">City</label>
+          <input type="text" id="city" value="Troy" required />
+        </div>
+        <div class="field">
+          <label for="zip">ZIP</label>
+          <input type="text" id="zip" required />
+        </div>
+        <div class="field">
+          <label for="prefDate">Preferred date</label>
+          <input type="date" id="prefDate" />
+        </div>
+        <div class="field">
+          <label for="prefTime">Preferred time</label>
+          <select id="prefTime">
+            <option value="Morning">Morning</option>
+            <option value="Afternoon">Afternoon</option>
+            <option value="Evening">Evening</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field" style="margin-top:14px;">
+        <label for="notes">Special instructions</label>
+        <textarea id="notes"></textarea>
+      </div>
+
+      <div class="price-box">
+        <span>Estimated total</span>
+        <span class="amount" id="priceAmount">$0.00</span>
+      </div>
+      <p style="font-size:0.78rem; color:rgba(22,26,23,0.55); margin-top:6px;">
+        This is an estimate. The final price shown on the secure Stripe checkout page is what you will be charged.
+      </p>
+
+      <button type="submit" class="btn btn-primary btn-lg btn-block" style="margin-top:16px;" id="submitBtn">
+        Continue to secure payment
+      </button>
+      <p class="msg" id="bookingMsg"></p>
+    </form>
+  </div>
+</section>
+
+<section id="commercial">
+  <div class="wrap">
+    <h2 class="section-title">Request a commercial walkthrough</h2>
+    <p class="section-sub">Larger and commercial spaces are quoted after a short walkthrough rather than an automatic estimate, so the price reflects your actual facility. Once we agree on a price, you will get a payment link in your client portal.</p>
+
+    <form id="commercialForm" class="form-card">
+      <input type="text" name="company_website" class="honeypot" tabindex="-1" autocomplete="off" aria-hidden="true" />
+      <div class="grid2">
+        <div class="field"><label for="cCompany">Company</label><input type="text" id="cCompany" required /></div>
+        <div class="field"><label for="cContact">Contact name</label><input type="text" id="cContact" required /></div>
+        <div class="field"><label for="cPhone">Phone</label><input type="tel" id="cPhone" required /></div>
+        <div class="field"><label for="cEmail">Email</label><input type="email" id="cEmail" required /></div>
+      </div>
+      <div class="field" style="margin-top:14px;"><label for="cAddress">Property address</label><input type="text" id="cAddress" required /></div>
+      <div class="grid2" style="margin-top:14px;">
+        <div class="field"><label for="cType">Property type</label><input type="text" id="cType" placeholder="Office, retail, medical" /></div>
+        <div class="field"><label for="cSqft">Approx. square footage</label><input type="number" id="cSqft" min="0" /></div>
+      </div>
+      <div class="field" style="margin-top:14px;"><label for="cNotes">Cleaning requirements</label><textarea id="cNotes"></textarea></div>
+
+      <button type="submit" class="btn btn-primary btn-lg btn-block" style="margin-top:16px;" id="commercialSubmitBtn">
+        Request walkthrough
+      </button>
+      <p class="msg" id="commercialMsg"></p>
+    </form>
+
+    <div class="success-panel form-card" id="commercialSuccess" hidden>
+      <h2>Request received!</h2>
+      <p style="color:rgba(22,26,23,0.65); margin-top:8px;">Our team will follow up to schedule a walkthrough and put together a custom quote. Once it is agreed, we will send you a secure payment link in your client portal.</p>
+    </div>
+  </div>
+</section>
+
+<section id="faq" style="background:var(--pine-50); border-top:1px solid var(--line);">
+  <div class="wrap" style="max-width:680px;">
+    <h2 class="section-title">Frequently asked questions</h2>
+    <dl style="margin-top:10px;">
+      <div class="faq-item"><dt>How do I get a price?</dt><dd>Use the estimate form above, pick a service, answer a few questions about your home, and see an estimated price instantly.</dd></div>
+      <div class="faq-item"><dt>What areas do you serve?</dt><dd>Troy, MI and the surrounding Metro Detroit communities, including Royal Oak, Birmingham, Rochester Hills, Sterling Heights, and Warren.</dd></div>
+      <div class="faq-item"><dt>Can I set up recurring cleaning?</dt><dd>Yes, choose weekly, every 2 weeks, or monthly on the form and your discount is applied automatically to your estimate.</dd></div>
+      <div class="faq-item"><dt>How does payment work?</dt><dd>Residential bookings are paid securely through Stripe when you submit the form. Commercial jobs are quoted first, then paid through a link in your client portal.</dd></div>
+      <div class="faq-item"><dt>Where do I check on a booking or pay an invoice later?</dt><dd>Use the Client Portal link in the menu above. Sign in with the same email you booked with and you will see your bookings, jobs, and any open invoices.</dd></div>
+    </dl>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap footer-grid">
+    <div>
+      <p style="font-family:Georgia,serif; font-size:1.1rem; font-weight:700; margin:0;">Troy Premier Green Cleaning Co.</p>
+      <p style="font-size:0.85rem; color:#9dbdac; margin-top:4px;">ABRI PRO CLEANING SERVICES LLC</p>
+      <p style="font-size:0.85rem; margin-top:14px;">Troy, MI &amp; Metro Detroit</p>
+      <a href="tel:+12485550100" style="display:block; margin-top:6px;">(248) 555 0100</a>
+      <a href="mailto:info@troypremiercleaning.com" style="display:block; margin-top:4px;">info@troypremiercleaning.com</a>
+    </div>
+    <div>
+      <h4>Explore</h4>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <a href="#services">Services</a>
+        <a href="#book">Book Now</a>
+        <a href="#commercial">Commercial</a>
+        <a href="#faq">FAQ</a>
+        <a href="client.html">Client Portal</a>
+        <a href="cleaner.html">Cleaner Portal</a>
+      </div>
+    </div>
+    <div>
+      <h4>Note</h4>
+      <p style="font-size:0.82rem; color:#b7cfc2;">Replace the placeholder phone and email above with your real contact details before launch.</p>
+    </div>
+  </div>
+  <p class="footer-bottom">&copy; <span id="year"></span> Troy Premier Green Cleaning Co. All rights reserved.</p>
+</footer>
+
+<div class="sticky-bar">
+  <a href="tel:+12485550100" class="btn btn-outline">Call Us</a>
+  <a href="#book" class="btn btn-primary">Book Now</a>
+</div>
+
+<!-- Supabase client (loaded from CDN, no build step needed) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+/* =============================================================================
+   1) PASTE YOUR SUPABASE VALUES HERE (Settings, API in your Supabase project)
+   ============================================================================= */
+const SUPABASE_URL = "https://YOUR-PROJECT-REF.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR-ANON-PUBLIC-KEY";
+
+// Guarded: if this CDN script is ever slow or briefly unreachable, the
+// estimate calculator below should still work, only submitting the form
+// needs Supabase to actually be loaded.
+let supabaseClient = null;
+try {
+  supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+} catch (err) {
+  console.error("Supabase failed to load", err);
+}
+
+/* =============================================================================
+   2) PRICING, edit these numbers any time to change what customers are quoted.
+      This all runs in the browser so you can preview changes instantly, but
+      the amount actually charged is always re checked on the server against
+      this same list before Stripe is asked to collect payment, so a visitor
+      cannot tamper with the price from their browser.
+   ============================================================================= */
+const SERVICES = [
+  { id: "standard-cleaning", name: "Standard Cleaning", desc: "Kitchens, bathrooms, living areas, and bedrooms, cleaned to a consistent standard.", base: 129, category: "Residential" },
+  { id: "deep-cleaning", name: "Deep Cleaning", desc: "A thorough top to bottom clean, a great first booking before recurring service.", base: 219, category: "Residential" },
+  { id: "move-in-cleaning", name: "Move In Cleaning", desc: "A full clean of an empty home before your furniture arrives.", base: 249, category: "Commercial" },
+  { id: "move-out-cleaning", name: "Move Out Cleaning", desc: "Built to help you hand back a spotless home.", base: 249, category: "Commercial" },
+  { id: "apartment-turnover", name: "Apartment Turnover", desc: "Fast, consistent turnover cleaning for property managers.", base: 159, category: "Commercial" }
+];
+
+const ADDONS = [
+  { id: "inside-oven", name: "Inside Oven", price: 35 },
+  { id: "inside-fridge", name: "Inside Fridge", price: 35 },
+  { id: "inside-cabinets", name: "Inside Cabinets", price: 45 },
+  { id: "baseboards", name: "Baseboards", price: 30 },
+  { id: "interior-windows", name: "Interior Windows", price: 30 },
+  { id: "pet-hair", name: "Pet Hair Removal", price: 20 }
+];
+
+const PER_BEDROOM = 15;
+const PER_BATHROOM = 20;
+const PER_500_SQFT_OVER_1500 = 25;
+const FREQUENCY_DISCOUNT = { one_time: 0, weekly: 0.15, biweekly: 0.10, monthly: 0.05 };
+const TAX_RATE = 0.06;
+const MINIMUM_PRICE = 99;
+
+/* ============================= rendering ================================ */
+document.getElementById("year").textContent = new Date().getFullYear();
+
+const serviceCardsEl = document.getElementById("serviceCards");
+SERVICES.forEach(function (s) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = '<span class="tag">' + s.category + '</span><h3>' + s.name + "</h3><p>" + s.desc + "</p>";
+  serviceCardsEl.appendChild(card);
+});
+
+const serviceSelect = document.getElementById("service");
+SERVICES.forEach(function (s) {
+  const opt = document.createElement("option");
+  opt.value = s.id;
+  opt.textContent = s.name;
+  serviceSelect.appendChild(opt);
+});
+
+const addonGrid = document.getElementById("addonGrid");
+ADDONS.forEach(function (a) {
+  const div = document.createElement("div");
+  div.className = "checkbox-item";
+  div.innerHTML =
+    '<input type="checkbox" id="addon-' + a.id + '" value="' + a.id + '" />' +
+    '<label for="addon-' + a.id + '" style="margin:0;">' + a.name + " (+$" + a.price + ")</label>";
+  addonGrid.appendChild(div);
+});
+
+/* ============================= pricing calc ============================== */
+function calculatePrice() {
+  const service = SERVICES.filter(function (s) { return s.id === serviceSelect.value; })[0];
+  const bedrooms = Number(document.getElementById("bedrooms").value) || 0;
+  const bathrooms = Number(document.getElementById("bathrooms").value) || 0;
+  const sqft = Number(document.getElementById("sqft").value) || 0;
+  const frequency = document.getElementById("frequency").value;
+
+  let subtotal = service.base;
+  if (bedrooms > 1) subtotal += (bedrooms - 1) * PER_BEDROOM;
+  if (bathrooms > 1) subtotal += (bathrooms - 1) * PER_BATHROOM;
+  if (sqft > 1500) subtotal += Math.ceil((sqft - 1500) / 500) * PER_500_SQFT_OVER_1500;
+
+  const selectedAddons = ADDONS.filter(function (a) {
+    return document.getElementById("addon-" + a.id).checked;
+  });
+  const addonTotal = selectedAddons.reduce(function (sum, a) { return sum + a.price; }, 0);
+  subtotal += addonTotal;
+
+  const discount = subtotal * (FREQUENCY_DISCOUNT[frequency] || 0);
+  let preTax = subtotal - discount;
+  if (preTax < MINIMUM_PRICE) preTax = MINIMUM_PRICE;
+  const tax = preTax * TAX_RATE;
+  const total = preTax + tax;
+
+  return { total: Math.round(total * 100) / 100, addonNames: selectedAddons.map(function (a) { return a.name; }) };
+}
+
+function refreshPrice() {
+  const result = calculatePrice();
+  document.getElementById("priceAmount").textContent = "$" + result.total.toFixed(2);
+}
+["service", "bedrooms", "bathrooms", "sqft", "frequency"].forEach(function (id) {
+  document.getElementById(id).addEventListener("input", refreshPrice);
+  document.getElementById(id).addEventListener("change", refreshPrice);
+});
+ADDONS.forEach(function (a) {
+  document.getElementById("addon-" + a.id).addEventListener("change", refreshPrice);
+});
+refreshPrice();
+
+/* ============================= payment return banner ====================== */
+(function showPayBanner() {
+  const params = new URLSearchParams(window.location.search);
+  const banner = document.getElementById("payBanner");
+  if (params.get("booking") === "success") {
+    banner.innerHTML = '<div class="pay-banner success"><strong>Payment received, thank you!</strong> A confirmation has been recorded and your booking is now on our schedule. You can check its status any time in the <a href="client.html">Client Portal</a>.</div>';
+  } else if (params.get("booking") === "cancelled") {
+    banner.innerHTML = '<div class="pay-banner cancel"><strong>Payment was not completed.</strong> Your booking was not charged. You are welcome to try again below.</div>';
+  }
+})();
+
+/* ============================= booking submit ============================ */
+const bookingForm = document.getElementById("bookingForm");
+bookingForm.addEventListener("submit", async function (e) {
+  e.preventDefault();
+  const msgEl = document.getElementById("bookingMsg");
+  const btn = document.getElementById("submitBtn");
+
+  if (bookingForm.company_website.value) {
+    return; // honeypot tripped, silently stop
+  }
+
+  if (!supabaseClient) {
+    msgEl.textContent = "Booking is temporarily unavailable, please call us directly or try again in a moment.";
+    msgEl.className = "msg error";
+    return;
+  }
+
+  const calc = calculatePrice();
+  const service = SERVICES.filter(function (s) { return s.id === serviceSelect.value; })[0];
+
+  const payload = {
+    service: service.name,
+    frequency: document.getElementById("frequency").value,
+    bedrooms: Number(document.getElementById("bedrooms").value) || null,
+    bathrooms: Number(document.getElementById("bathrooms").value) || null,
+    square_footage: Number(document.getElementById("sqft").value) || null,
+    addons: calc.addonNames.join(", ") || null,
+    estimated_price: calc.total,
+    first_name: document.getElementById("firstName").value.trim(),
+    last_name: document.getElementById("lastName").value.trim(),
+    email: document.getElementById("email").value.trim(),
+    phone: document.getElementById("phone").value.trim(),
+    address: document.getElementById("address").value.trim(),
+    city: document.getElementById("city").value.trim(),
+    zip: document.getElementById("zip").value.trim(),
+    preferred_date: document.getElementById("prefDate").value || null,
+    preferred_time: document.getElementById("prefTime").value,
+    special_instructions: document.getElementById("notes").value.trim() || null,
+    status: "pending_payment"
+  };
+
+  btn.disabled = true;
+  btn.textContent = "Preparing checkout...";
+  msgEl.textContent = "";
+  msgEl.className = "msg";
+
+  try {
+    // 1) save the booking first, so nothing is lost even if checkout is closed early
+    const insertResult = await supabaseClient.from("bookings").insert(payload).select().single();
+    if (insertResult.error) throw insertResult.error;
+    const bookingId = insertResult.data.id;
+
+    // 2) ask the server function to open a Stripe checkout session for this
+    //    booking. The server looks the price up itself, it never trusts the
+    //    number sent from this page.
+    const response = await fetch("/.netlify/functions/create-checkout-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "booking", id: bookingId })
+    });
+    const session = await response.json();
+    if (!response.ok || !session.url) throw new Error(session.error || "Could not start checkout");
+
+    // 3) send the customer to Stripe's secure, hosted payment page
+    window.location.href = session.url;
+  } catch (err) {
+    msgEl.textContent = "Something went wrong starting checkout. Please try again or call us directly.";
+    msgEl.className = "msg error";
+    console.error(err);
+    btn.disabled = false;
+    btn.textContent = "Continue to secure payment";
+  }
+});
+
+/* ============================= commercial submit ========================== */
+const commercialForm = document.getElementById("commercialForm");
+commercialForm.addEventListener("submit", async function (e) {
+  e.preventDefault();
+  const msgEl = document.getElementById("commercialMsg");
+  const btn = document.getElementById("commercialSubmitBtn");
+
+  if (commercialForm.company_website.value) {
+    document.getElementById("commercialForm").hidden = true;
+    document.getElementById("commercialSuccess").hidden = false;
+    return;
+  }
+
+  if (!supabaseClient) {
+    msgEl.textContent = "This form is temporarily unavailable, please call us directly or try again in a moment.";
+    msgEl.className = "msg error";
+    return;
+  }
+
+  const payload = {
+    company_name: document.getElementById("cCompany").value.trim(),
+    contact_name: document.getElementById("cContact").value.trim(),
+    phone: document.getElementById("cPhone").value.trim(),
+    email: document.getElementById("cEmail").value.trim(),
+    property_address: document.getElementById("cAddress").value.trim(),
+    property_type: document.getElementById("cType").value.trim() || null,
+    square_footage: Number(document.getElementById("cSqft").value) || null,
+    notes: document.getElementById("cNotes").value.trim() || null
+  };
+
+  btn.disabled = true;
+  btn.textContent = "Submitting...";
+  msgEl.textContent = "";
+  msgEl.className = "msg";
+
+  try {
+    const result = await supabaseClient.from("commercial_leads").insert(payload);
+    if (result.error) throw result.error;
+    commercialForm.hidden = true;
+    document.getElementById("commercialSuccess").hidden = false;
+  } catch (err) {
+    msgEl.textContent = "Something went wrong submitting your request. Please try again or call us directly.";
+    msgEl.className = "msg error";
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Request walkthrough";
+  }
+});
+</script>
+</body>
+</html>
